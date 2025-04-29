@@ -1,0 +1,2 @@
+export const ADAPTOR_PROGRAM_ID =
+  "EW35URAx3LiM13fFK3QxAXfGemHso9HWPixrv7YDY4AM";
