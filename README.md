@@ -269,3 +269,119 @@ Feel free to extend these base scripts for more specific use cases or integratio
 ---
 
 For questions or support regarding the Voltr protocol itself, please refer to the official Voltr documentation.
+
+---
+
+## Spot Strategy Extensions (voltr-spot-scripts)
+
+The following sections detail the additions specific to the `voltr-spot-scripts` project, which builds upon the base functionality to include spot trading strategy interactions with Jupiter for token swaps.
+
+### Additional Configuration (`config/spot.ts`)
+
+This file complements `config/base.ts` and holds parameters specific to the spot trading strategy.
+
+- **Oracle Information:**
+
+  - `assetOracleAddress`: **Required.** The Pyth oracle address for the vault's base asset.
+  - `foreignOracleAddress`: **Required.** The Pyth oracle address for the foreign asset to be traded.
+
+- **Foreign Asset Details:**
+
+  - `foreignMintAddress`: **Required.** The mint address of the foreign token to be swapped into/out of.
+  - `foreignTokenProgram`: **Required.** The token program ID for the foreign asset (e.g., `TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA` for SPL Token).
+
+- **Swap Parameters:**
+  - `buyForeignAmountInAsset`: The amount of the vault's base asset to use for buying the foreign asset, denominated in the smallest units of the base asset.
+  - `sellForeignAmountInForeign`: The amount of the foreign asset to sell, denominated in the smallest units of the foreign asset.
+  - `jupiterSlippageBps`: Slippage tolerance in basis points for Jupiter swaps (e.g., 50 = 0.5%).
+  - `jupiterMaxAccounts`: Maximum number of accounts that can be included in Jupiter swap instructions.
+
+### New Admin Script
+
+- **`src/scripts/admin-add-adaptor.ts`**
+  - **Purpose:** Enables the vault to use spot trading strategies by adding the Voltr Spot Adaptor program (`ADAPTOR_PROGRAM_ID` found in `src/constants/spot.ts`) to the vault's list of approved adaptors. This only needs to be run once per vault.
+  - **Requires:** `vaultAddress` (from `config/base.ts`).
+  - **Uses:** `ADMIN_FILE_PATH`. May update the vault's LUT if `useLookupTable` is true.
+
+### New Manager Scripts
+
+These scripts are executed by the vault's designated Manager.
+
+- **`src/scripts/manager-initialize-spot.ts`**
+
+  - **Purpose:** Initializes the spot strategy for the specified foreign token. Sets up the necessary oracle receipt accounts and token accounts for vault strategy authority. This only needs to be run once per foreign token.
+  - **Requires:** `vaultAddress`, `assetMintAddress`, `assetTokenProgram`, `lookupTableAddress` (if used) from `config/base.ts`. Also requires `assetOracleAddress`, `foreignMintAddress`, `foreignTokenProgram`, `foreignOracleAddress` from `config/spot.ts`.
+  - **Outputs:** Logs the transaction signature upon successful initialization.
+  - **Uses:** `MANAGER_FILE_PATH`.
+
+- **`src/scripts/manager-buy-spot.ts`**
+
+  - **Purpose:** Buys the foreign token using the vault's base asset by performing a swap via Jupiter.
+  - **Requires:** `vaultAddress`, `assetMintAddress`, `assetTokenProgram`, `lookupTableAddress` (if used) from `config/base.ts`. Also requires `assetOracleAddress`, `foreignMintAddress`, `foreignTokenProgram`, `foreignOracleAddress`, `buyForeignAmountInAsset`, `jupiterSlippageBps`, `jupiterMaxAccounts` from `config/spot.ts`.
+  - **Uses:** `MANAGER_FILE_PATH`.
+
+- **`src/scripts/manager-sell-spot.ts`**
+  - **Purpose:** Sells the foreign token to receive the vault's base asset by performing a swap via Jupiter.
+  - **Requires:** `vaultAddress`, `assetMintAddress`, `assetTokenProgram`, `lookupTableAddress` (if used) from `config/base.ts`. Also requires `assetOracleAddress`, `foreignMintAddress`, `foreignTokenProgram`, `foreignOracleAddress`, `sellForeignAmountInForeign`, `jupiterSlippageBps`, `jupiterMaxAccounts` from `config/spot.ts`.
+  - **Uses:** `MANAGER_FILE_PATH`.
+
+### Special Utility Functions
+
+- **`src/utils/setup-jupiter-swap.ts`**
+  - **Purpose:** Helper function that interfaces with Jupiter's API to set up swap instructions for buying or selling tokens.
+  - **Functionality:** Fetches quotes from Jupiter, creates swap instructions, and formats them for inclusion in the Voltr transaction.
+
+### Spot Strategy Flow
+
+This outlines the typical sequence for setting up and managing the spot strategy:
+
+1. **Complete Basic Vault Setup:** Follow steps 1-4 in the [Basic Usage Flow](#basic-usage-flow) to initialize the vault and configure `config/base.ts`.
+2. **Configure Spot Parameters:** Edit `config/spot.ts`. Fill in the required oracle addresses, foreign token details, and swap parameters.
+3. **Add Spot Adaptor (Admin):** Run `pnpm ts-node src/scripts/admin-add-adaptor.ts` to authorize the vault to use the spot adaptor.
+4. **Initialize Spot Strategy (Manager):** Run `pnpm ts-node src/scripts/manager-initialize-spot.ts` to set up the on-chain accounts for the specific foreign token you wish to trade.
+5. **Ensure Vault has Funds:** Use `user-deposit-vault.ts` (as the User) if the vault needs funds.
+6. **Buy Foreign Token (Manager):** Run `pnpm ts-node src/scripts/manager-buy-spot.ts` to swap some of the vault's base asset for the foreign token.
+7. **Query Positions:** Use `query-strategy-positions.ts` to see the updated allocation and foreign token balance.
+8. **Sell Foreign Token (Manager):** Run `pnpm ts-node src/scripts/manager-sell-spot.ts` to swap the foreign token back to the vault's base asset.
+9. **User Withdrawal:** Users can withdraw from the vault as usual using the `user-*` withdrawal scripts.
+
+### Protocol Integration Details
+
+- **Jupiter Integration:** The spot strategy scripts utilize Jupiter's swap API to perform token swaps. The `setup-jupiter-swap.ts` utility function handles the API interaction to fetch quotes and prepare swap instructions.
+- **Pyth Oracles:** The spot adaptor uses Pyth oracle price feeds to track asset values. Oracle addresses for both the vault's base asset and the foreign token must be specified in `config/spot.ts`.
+- **Transaction Optimization:** The scripts support Address Lookup Tables (LUTs) to optimize transaction sizes and costs, especially important for Jupiter swaps which can involve many accounts.
+
+### Updated Project Structure (voltr-spot-scripts)
+
+```
+voltr-spot-scripts
+├── pnpm-lock.yaml
+├── config/
+│   ├── base.ts             # Base vault configuration
+│   └── spot.ts             # SPOT ADAPTOR: Spot strategy config
+├── README.md               # This file (now including Spot extensions)
+├── package.json            # Project metadata and dependencies
+├── tsconfig.json           # TypeScript compiler options
+└── src
+    ├── constants/
+    │   ├── base.ts         # Base constants (e.g., PROTOCOL_ADMIN, SEEDS, DISCRIMINATOR)
+    │   └── spot.ts         # SPOT ADAPTOR: Spot adaptor program ID
+    ├── utils/
+    │   ├── helper.ts       # Core utility functions (tx sending, ATAs, LUTs)
+    │   └── setup-jupiter-swap.ts # SPOT ADAPTOR: Jupiter swap setup helper
+    └── scripts/            # Executable scripts
+        ├── user-withdraw-vault.ts
+        ├── user-query-position.ts
+        ├── query-strategy-positions.ts
+        ├── admin-update-vault.ts
+        ├── user-request-and-withdraw-vault.ts
+        ├── admin-harvest-fee.ts
+        ├── user-deposit-vault.ts
+        ├── admin-init-vault.ts
+        ├── admin-add-adaptor.ts      # SPOT ADAPTOR: Adds the spot adaptor to the vault
+        ├── user-cancel-request-withdraw-vault.ts
+        ├── user-request-withdraw-vault.ts
+        ├── manager-buy-spot.ts       # SPOT ADAPTOR: Buys foreign token with vault's base asset
+        ├── manager-sell-spot.ts      # SPOT ADAPTOR: Sells foreign token for vault's base asset
+        └── manager-initialize-spot.ts # SPOT ADAPTOR: Initializes spot strategy
+```
