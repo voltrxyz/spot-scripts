@@ -7,8 +7,8 @@ export const vaultConfig: VaultConfig = {
   startAtTs: new BN(0),
   managerPerformanceFee: 500, // 500 = 5% in basis points
   adminPerformanceFee: 500, // 500 = 5% in basis points
-  managerManagementFee: 0, // management fee not yet implemented
-  adminManagementFee: 0, // management fee not yet implemented
+  managerManagementFee: 0, // 0 = 0% in basis points
+  adminManagementFee: 0, // 0 = 0% in basis points
   lockedProfitDegradationDuration: new BN(0), // profit will be realised linearly over time (seconds)
   redemptionFee: 0, // one time fee when withdrawing
   issuanceFee: 0, // one time fee when depositing
@@ -21,6 +21,14 @@ export const vaultParams: VaultParams = {
   name: "",
   description: "",
 };
+
+// ONLY NEEDED IF YOU WANT TO SET LP TOKEN METADATA
+export const lpTokenMetadata = {
+  symbol: "",
+  name: "",
+  uri: "",
+};
+
 // MAIN ASSET DEPOSITED INTO VAULT
 export const assetMintAddress = "";
 export const assetTokenProgram = ""; // TOKEN_PROGRAM_ID or TOKEN_2022_PROGRAM_ID
