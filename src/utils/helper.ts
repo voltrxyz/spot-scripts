@@ -162,29 +162,17 @@ export const setupTokenAccount = async (
 
 export const setupAddressLookupTable = async (
   connection: Connection,
-  authority: PublicKey,
   payer: PublicKey,
+  authority: PublicKey,
   addresses: string[],
   txIxs: TransactionInstruction[],
-  lookupTable?: PublicKey
+  lookupTable: PublicKey
 ) => {
-  let lut: PublicKey;
   const lutAddressesStr: string[] = [];
-  if (lookupTable) {
-    lut = lookupTable;
-    const lutData = await connection.getAddressLookupTable(lut);
-    lutAddressesStr.push(
-      ...(lutData.value?.state.addresses.map((a) => a.toBase58()) ?? [])
-    );
-  } else {
-    const [createLUTIx, lutTemp] = AddressLookupTableProgram.createLookupTable({
-      authority,
-      payer,
-      recentSlot: await connection.getSlot(),
-    });
-    lut = lutTemp;
-    txIxs.push(createLUTIx);
-  }
+  const lutData = await connection.getAddressLookupTable(lookupTable);
+  lutAddressesStr.push(
+    ...(lutData.value?.state.addresses.map((a) => a.toBase58()) ?? [])
+  );
 
   const filteredUniqueIxsPubkeys = addresses
     .filter((pubkey) => !lutAddressesStr.includes(pubkey))
@@ -193,14 +181,14 @@ export const setupAddressLookupTable = async (
   if (filteredUniqueIxsPubkeys.length > 0) {
     txIxs.push(
       AddressLookupTableProgram.extendLookupTable({
-        lookupTable: lut,
-        authority: payer,
+        lookupTable,
+        authority,
         addresses: filteredUniqueIxsPubkeys,
         payer,
       })
     );
   }
-  return lut;
+  return lookupTable;
 };
 
 export const getAddressLookupTableAccounts = async (
