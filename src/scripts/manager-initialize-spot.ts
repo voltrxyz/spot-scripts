@@ -25,8 +25,7 @@ import {
   foreignOracleAddress,
   foreignTokenProgram,
 } from "../../config/spot";
-import { ADAPTOR_PROGRAM_ID } from "../constants/spot";
-import { DISCRIMINATOR, SEEDS } from "../constants/base";
+import { ADAPTOR_PROGRAM_ID, DISCRIMINATOR, SEEDS } from "../constants/spot";
 
 const initializeSpotHandler = async (
   connection: Connection,

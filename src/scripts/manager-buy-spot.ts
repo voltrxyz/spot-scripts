@@ -29,8 +29,7 @@ import {
   jupiterMaxAccounts,
   jupiterSlippageBps,
 } from "../../config/spot";
-import { ADAPTOR_PROGRAM_ID } from "../constants/spot";
-import { DISCRIMINATOR, SEEDS } from "../constants/base";
+import { ADAPTOR_PROGRAM_ID, DISCRIMINATOR, SEEDS } from "../constants/spot";
 import { BN } from "@coral-xyz/anchor";
 import { setupJupiterSwap } from "../utils/setup-jupiter-swap";
 
