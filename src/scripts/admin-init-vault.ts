@@ -1,5 +1,6 @@
 import "dotenv/config";
 import {
+  AddressLookupTableProgram,
   Connection,
   Keypair,
   PublicKey,
@@ -61,26 +62,19 @@ const initVaultHandler = async () => {
 
   await connection.confirmTransaction(txSig0, "finalized");
   console.log(`Vault initialized and adaptor added with signature: ${txSig0}`);
-  console.log(`Update address into config/base.ts`);
+  console.log(`Update below vault address into config/base.ts`);
   console.log("Vault:", vault.toBase58());
 
   if (useLookupTable) {
-    const transactionIxs1: TransactionInstruction[] = [];
-
-    const lut = await setupAddressLookupTable(
-      connection,
-      payer,
-      payer,
-      [
-        ...new Set([
-          ...createInitializeVaultIx.keys.map((k) => k.pubkey.toBase58()),
-        ]),
-      ],
-      transactionIxs1
-    );
+    const [createLUTIx, lookupTable] =
+      AddressLookupTableProgram.createLookupTable({
+        authority: payer,
+        payer,
+        recentSlot: await connection.getSlot(),
+      });
 
     const txSig1 = await sendAndConfirmOptimisedTx(
-      transactionIxs1,
+      [createLUTIx],
       process.env.HELIUS_RPC_URL!,
       payerKp,
       [],
@@ -89,8 +83,34 @@ const initVaultHandler = async () => {
     );
 
     console.log(`LUT created with signature: ${txSig1}`);
-    console.log(`Update address into config/base.ts`);
-    console.log("Lookup Table:", lut.toBase58());
+    console.log(`Update below LUT address into config/base.ts`);
+    console.log("LUT:", lookupTable.toBase58());
+
+    const transactionIxs1: TransactionInstruction[] = [];
+
+    await setupAddressLookupTable(
+      connection,
+      payer,
+      payer,
+      [
+        ...new Set([
+          ...createInitializeVaultIx.keys.map((k) => k.pubkey.toBase58()),
+        ]),
+      ],
+      transactionIxs1,
+      lookupTable
+    );
+
+    const txSig2 = await sendAndConfirmOptimisedTx(
+      transactionIxs1,
+      process.env.HELIUS_RPC_URL!,
+      payerKp,
+      [],
+      undefined,
+      50_000
+    );
+
+    console.log(`LUT extended with signature: ${txSig2}`);
   }
 };
 
