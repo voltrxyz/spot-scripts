@@ -1,11 +1,23 @@
 export const ADAPTOR_PROGRAM_ID =
   "EW35URAx3LiM13fFK3QxAXfGemHso9HWPixrv7YDY4AM";
 
+export const JUPITER_LEND_PROGRAM_ID =
+  "jup3YeL8QhtSx1e253b2FDvsMNC87fDrgQZivbrndc9";
+
+export const JUPITER_LIQUIDITY_PROGRAM_ID =
+  "jupeiUmn818Jg1ekPURTpr4mFo29p46vygyykFJ3wZC";
+
+export const JUPITER_REWARDS_RATE_PROGRAM_ID =
+  "jup7TthsMgcR9Y3L277b8Eo9uboVSmu1utkuXHNUKar";
+
 export const SEEDS = {
   ORACLE_INIT_RECEIPT: "oracle_init_receipt",
 };
 
 export const DISCRIMINATOR = {
+  DEPOSIT_JUPITER_EARN: [56, 2, 200, 235, 238, 139, 231, 190],
+  INITIALIZE_JUPITER_EARN: [96, 41, 228, 66, 7, 63, 88, 208],
   INITIALIZE_SPOT: [206, 194, 174, 21, 64, 192, 115, 9],
   SWAP_SPOT: [198, 133, 229, 32, 233, 2, 193, 212],
+  WITHDRAW_JUPITER_EARN: [232, 204, 244, 40, 201, 192, 7, 194],
 };
