@@ -119,21 +119,10 @@ const withdrawEarnStrategy = async (
 
   let transactionIxs: TransactionInstruction[] = [];
 
-  const vaultStrategyAssetAta = await setupTokenAccount(
-    connection,
-    payer,
-    vaultAssetMint,
-    vaultStrategyAuth,
-    transactionIxs,
-    vaultAssetTokenProgram
-  );
-
-  const vaultStrategyFTokenAta = await setupTokenAccount(
-    connection,
-    payer,
+  const vaultStrategyFTokenAta = getAssociatedTokenAddressSync(
     fTokenMint,
     vaultStrategyAuth,
-    transactionIxs,
+    true,
     fTokenProgram
   );
 
