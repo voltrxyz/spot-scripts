@@ -9,8 +9,11 @@ export const buyForeignAmountInAsset = 1_000_000;
 export const sellForeignAmountInForeign = 1_000_000;
 
 export const jupiterSlippageBps = 50; // 0.5%
-export const jupiterMaxAccounts = 16; 
+export const jupiterMaxAccounts = 16;
 
 // JUPITER EARN
 export const depositStrategyAmount = 1_000_000;
 export const withdrawStrategyAmount = 1_000_000;
+
+// DIRECT WITHDRAW
+export const directWithdrawDiscriminator: number[] = [];
