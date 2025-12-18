@@ -9,7 +9,6 @@ import {
 import {
   getAddressLookupTableAccounts,
   sendAndConfirmOptimisedTx,
-  setupTokenAccount,
 } from "../utils/helper";
 import { BN } from "@coral-xyz/anchor";
 import { VoltrClient } from "@voltr/vault-sdk";
