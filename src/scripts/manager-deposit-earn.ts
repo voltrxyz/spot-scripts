@@ -57,7 +57,6 @@ const depositEarnStrategy = async (
   jupiterLendProgram: PublicKey,
   jupiterLiquidityProgram: PublicKey,
   jupiterRewardsRateProgram: PublicKey,
-  fTokenProgram: PublicKey,
   instructionDiscriminator: number[],
   lookupTableAddresses: string[] = []
 ) => {
@@ -113,7 +112,7 @@ const depositEarnStrategy = async (
     fTokenMint,
     vaultStrategyAuth,
     true,
-    fTokenProgram
+    vaultAssetTokenProgram
   );
 
   const jVault = getAssociatedTokenAddressSync(
@@ -186,7 +185,6 @@ const main = async () => {
     new PublicKey(JUPITER_LEND_PROGRAM_ID),
     new PublicKey(JUPITER_LIQUIDITY_PROGRAM_ID),
     new PublicKey(JUPITER_REWARDS_RATE_PROGRAM_ID),
-    new PublicKey(TOKEN_PROGRAM_ID),
     DISCRIMINATOR.DEPOSIT_JUPITER_EARN,
     useLookupTable ? [lookupTableAddress] : []
   );
