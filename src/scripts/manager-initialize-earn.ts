@@ -44,7 +44,6 @@ const initializeSpotHandler = async (
   jupiterLendProgram: PublicKey,
   jupiterLiquidityProgram: PublicKey,
   jupiterRewardsRateProgram: PublicKey,
-  fTokenProgram: PublicKey,
   instructionDiscriminator: number[],
   lookupTableAddress: string | null
 ) => {
@@ -79,7 +78,7 @@ const initializeSpotHandler = async (
     fTokenMint,
     vaultStrategyAuth,
     transactionIxs,
-    fTokenProgram
+    assetTokenProgram
   );
 
   const createInitializeStrategyIx = await vc.createInitializeStrategyIx(
@@ -219,7 +218,6 @@ const main = async () => {
     new PublicKey(JUPITER_LEND_PROGRAM_ID),
     new PublicKey(JUPITER_LIQUIDITY_PROGRAM_ID),
     new PublicKey(JUPITER_REWARDS_RATE_PROGRAM_ID),
-    TOKEN_PROGRAM_ID,
     DISCRIMINATOR.INITIALIZE_JUPITER_EARN,
     useLookupTable ? lookupTableAddress : null
   );
