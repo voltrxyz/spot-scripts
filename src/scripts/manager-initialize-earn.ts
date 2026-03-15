@@ -201,7 +201,7 @@ const initializeSpotHandler = async (
 };
 
 const main = async () => {
-  const payerKpFile = fs.readFileSync(process.env.MANAGER_FILE_PATH!, "utf-8");
+  const payerKpFile = fs.readFileSync(process.env.ADMIN_FILE_PATH!, "utf-8");
   const payerKpData = JSON.parse(payerKpFile);
   const payerSecret = Uint8Array.from(payerKpData);
   const payerKp = Keypair.fromSecretKey(payerSecret);
