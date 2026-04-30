@@ -1,17 +1,23 @@
 import "dotenv/config";
 import * as fs from "fs";
 import {
-  Connection,
-  Keypair,
-  PublicKey,
-  TransactionInstruction,
-} from "@solana/web3.js";
+  address,
+  createKeyPairSignerFromBytes,
+  createSolanaRpc,
+  type Address,
+  type Instruction,
+} from "@solana/kit";
 import {
-  getAddressLookupTableAccounts,
+  findVaultStrategyAuthPda,
+  getInitializeStrategyInstructionAsync,
+} from "@voltr/vault-sdk";
+import {
+  getAddressesByLookupTable,
+  appendRemainingAccounts,
+  publicKeyToAddress,
   sendAndConfirmOptimisedTx,
   setupTokenAccount,
 } from "../utils/helper";
-import { VoltrClient } from "@voltr/vault-sdk";
 import {
   assetMintAddress,
   vaultAddress,
@@ -26,166 +32,97 @@ import {
   foreignTokenProgram,
 } from "../../config/spot";
 import { ADAPTOR_PROGRAM_ID, DISCRIMINATOR, SEEDS } from "../constants/spot";
+import { PublicKey } from "@solana/web3.js";
 
-const initializeSpotHandler = async (
-  connection: Connection,
-  payerKp: Keypair,
-  managerKp: Keypair,
-  vault: PublicKey,
-  vaultAssetMint: PublicKey,
-  assetTokenProgram: PublicKey,
-  assetOracle: PublicKey,
-  foreignAssetMint: PublicKey,
-  foreignTokenProgram: PublicKey,
-  foreignOracle: PublicKey,
-  adaptorProgram: PublicKey,
-  oracleInitReceiptSeed: string,
-  instructionDiscriminator: number[],
-  lookupTableAddress: string | null
-) => {
-  const vc = new VoltrClient(connection);
-
-  const { vaultStrategyAuth } = vc.findVaultStrategyAddresses(
-    vault,
-    foreignAssetMint
+const main = async () => {
+  const payerSecret = Uint8Array.from(
+    JSON.parse(fs.readFileSync(process.env.ADMIN_FILE_PATH!, "utf-8"))
   );
+  const payerSigner = await createKeyPairSignerFromBytes(payerSecret);
+  const rpc = createSolanaRpc(process.env.HELIUS_RPC_URL!);
 
-  let transactionIxs: TransactionInstruction[] = [];
+  const vaultAssetMintPk = new PublicKey(assetMintAddress);
+  const foreignAssetMint = new PublicKey(foreignMintAddress);
+  const assetTokenProgramPk = new PublicKey(assetTokenProgram);
+  const foreignTokenProgramPk = new PublicKey(foreignTokenProgram);
+  const adaptorProgram = new PublicKey(ADAPTOR_PROGRAM_ID);
+
+  const [vaultStrategyAuth] = await findVaultStrategyAuthPda({
+    vault: vaultAddress,
+    strategy: publicKeyToAddress(foreignAssetMint),
+  });
+
+  const transactionIxs: Instruction[] = [];
 
   const vaultStrategyAssetAta = await setupTokenAccount(
-    connection,
-    managerKp.publicKey,
-    vaultAssetMint,
+    rpc,
+    payerSigner,
+    assetMintAddress,
     vaultStrategyAuth,
     transactionIxs,
     assetTokenProgram
   );
 
   const vaultStrategyForeignAta = await setupTokenAccount(
-    connection,
-    managerKp.publicKey,
-    foreignAssetMint,
+    rpc,
+    payerSigner,
+    publicKeyToAddress(foreignAssetMint),
     vaultStrategyAuth,
     transactionIxs,
-    foreignTokenProgram
+    publicKeyToAddress(foreignTokenProgramPk)
   );
 
   const [assetOracleInitReceipt] = PublicKey.findProgramAddressSync(
     [
-      Buffer.from(oracleInitReceiptSeed),
-      vaultStrategyAuth.toBuffer(),
-      vaultAssetMint.toBuffer(),
+      Buffer.from(SEEDS.ORACLE_INIT_RECEIPT),
+      new PublicKey(vaultStrategyAuth).toBuffer(),
+      vaultAssetMintPk.toBuffer(),
     ],
     adaptorProgram
   );
 
   const [foreignOracleInitReceipt] = PublicKey.findProgramAddressSync(
     [
-      Buffer.from(oracleInitReceiptSeed),
-      vaultStrategyAuth.toBuffer(),
+      Buffer.from(SEEDS.ORACLE_INIT_RECEIPT),
+      new PublicKey(vaultStrategyAuth).toBuffer(),
       foreignAssetMint.toBuffer(),
     ],
     adaptorProgram
   );
 
-  const createInitializeStrategyIx = await vc.createInitializeStrategyIx(
-    {
-      instructionDiscriminator: Buffer.from(instructionDiscriminator),
-    },
-    {
-      payer: payerKp.publicKey,
-      manager: managerKp.publicKey,
-      vault,
-      strategy: foreignAssetMint,
-      remainingAccounts: [
-        {
-          pubkey: vaultAssetMint,
-          isWritable: false,
-          isSigner: false,
-        },
-        {
-          pubkey: vaultStrategyAssetAta,
-          isWritable: false,
-          isSigner: false,
-        },
-        {
-          pubkey: assetTokenProgram,
-          isWritable: false,
-          isSigner: false,
-        },
-        {
-          pubkey: assetOracle,
-          isWritable: false,
-          isSigner: false,
-        },
-        {
-          pubkey: assetOracleInitReceipt,
-          isWritable: true,
-          isSigner: false,
-        },
-        {
-          pubkey: vaultStrategyForeignAta,
-          isWritable: false,
-          isSigner: false,
-        },
-        {
-          pubkey: foreignTokenProgram,
-          isWritable: false,
-          isSigner: false,
-        },
-        {
-          pubkey: foreignOracle,
-          isWritable: false,
-          isSigner: false,
-        },
-        {
-          pubkey: foreignOracleInitReceipt,
-          isWritable: true,
-          isSigner: false,
-        },
-      ],
-      adaptorProgram,
-    }
+  const initializeStrategyIx = await getInitializeStrategyInstructionAsync({
+    payer: payerSigner,
+    manager: payerSigner,
+    vault: vaultAddress,
+    strategy: publicKeyToAddress(foreignAssetMint),
+    adaptorProgram: address(ADAPTOR_PROGRAM_ID),
+    instructionDiscriminator: new Uint8Array(DISCRIMINATOR.INITIALIZE_SPOT),
+    additionalArgs: null,
+  });
+
+  transactionIxs.push(
+    appendRemainingAccounts(initializeStrategyIx, [
+      { pubkey: vaultAssetMintPk, isSigner: false, isWritable: false },
+      { pubkey: new PublicKey(vaultStrategyAssetAta), isSigner: false, isWritable: false },
+      { pubkey: assetTokenProgramPk, isSigner: false, isWritable: false },
+      { pubkey: new PublicKey(assetOracleAddress), isSigner: false, isWritable: false },
+      { pubkey: assetOracleInitReceipt, isSigner: false, isWritable: true },
+      { pubkey: new PublicKey(vaultStrategyForeignAta), isSigner: false, isWritable: false },
+      { pubkey: foreignTokenProgramPk, isSigner: false, isWritable: false },
+      { pubkey: new PublicKey(foreignOracleAddress), isSigner: false, isWritable: false },
+      { pubkey: foreignOracleInitReceipt, isSigner: false, isWritable: true },
+    ])
   );
-
-  transactionIxs.push(createInitializeStrategyIx);
-
-  const lookupTableAccounts = lookupTableAddress
-    ? await getAddressLookupTableAccounts([lookupTableAddress], connection)
-    : [];
 
   const txSig = await sendAndConfirmOptimisedTx(
     transactionIxs,
     process.env.HELIUS_RPC_URL!,
-    managerKp,
-    [],
-    lookupTableAccounts
+    payerSigner,
+    useLookupTable && lookupTableAddress
+      ? await getAddressesByLookupTable([lookupTableAddress], rpc)
+      : {}
   );
   console.log("Spot initialized with signature:", txSig);
-};
-
-const main = async () => {
-  const payerKpFile = fs.readFileSync(process.env.ADMIN_FILE_PATH!, "utf-8");
-  const payerKpData = JSON.parse(payerKpFile);
-  const payerSecret = Uint8Array.from(payerKpData);
-  const payerKp = Keypair.fromSecretKey(payerSecret);
-
-  await initializeSpotHandler(
-    new Connection(process.env.HELIUS_RPC_URL!),
-    payerKp,
-    payerKp,
-    new PublicKey(vaultAddress),
-    new PublicKey(assetMintAddress),
-    new PublicKey(assetTokenProgram),
-    new PublicKey(assetOracleAddress),
-    new PublicKey(foreignMintAddress),
-    new PublicKey(foreignTokenProgram),
-    new PublicKey(foreignOracleAddress),
-    new PublicKey(ADAPTOR_PROGRAM_ID),
-    SEEDS.ORACLE_INIT_RECEIPT,
-    DISCRIMINATOR.INITIALIZE_SPOT,
-    useLookupTable ? lookupTableAddress : null
-  );
 };
 
 main();

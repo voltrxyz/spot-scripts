@@ -1,18 +1,24 @@
 import "dotenv/config";
 import * as fs from "fs";
+import { AccountMeta, PublicKey } from "@solana/web3.js";
+import { BN } from "@coral-xyz/anchor";
 import {
-  AccountMeta,
-  Connection,
-  Keypair,
-  PublicKey,
-  TransactionInstruction,
-} from "@solana/web3.js";
+  address,
+  createKeyPairSignerFromBytes,
+  createSolanaRpc,
+  type Instruction,
+} from "@solana/kit";
 import {
-  getAddressLookupTableAccounts,
+  findVaultStrategyAuthPda,
+  getWithdrawStrategyInstructionAsync,
+} from "@voltr/vault-sdk";
+import {
+  getAddressesByLookupTable,
+  appendRemainingAccounts,
+  publicKeyToAddress,
   sendAndConfirmOptimisedTx,
   setupTokenAccount,
 } from "../utils/helper";
-import { VoltrClient } from "@voltr/vault-sdk";
 import {
   assetMintAddress,
   vaultAddress,
@@ -30,193 +36,118 @@ import {
   jupiterSlippageBps,
 } from "../../config/spot";
 import { ADAPTOR_PROGRAM_ID, DISCRIMINATOR, SEEDS } from "../constants/spot";
-import { BN } from "@coral-xyz/anchor";
 import { setupJupiterSwap } from "../utils/setup-jupiter-swap";
 
-const sellSpotHandler = async (
-  connection: Connection,
-  managerKp: Keypair,
-  vault: PublicKey,
-  vaultAssetMint: PublicKey,
-  assetTokenProgram: PublicKey,
-  assetOracle: PublicKey,
-  foreignAssetMint: PublicKey,
-  foreignTokenProgram: PublicKey,
-  foreignOracle: PublicKey,
-  adaptorProgram: PublicKey,
-  oracleInitReceiptSeed: string,
-  sellAmountInForeign: BN,
-  jupiterSlippageBps: number,
-  jupiterMaxAccounts: number,
-  instructionDiscriminator: number[],
-  lookupTableAddress: string | null
-) => {
-  if (sellAmountInForeign.isZero()) {
-    throw new Error("Sell amount must be greater than 0");
-  }
-
-  const vc = new VoltrClient(connection);
-
-  const { vaultStrategyAuth } = vc.findVaultStrategyAddresses(
-    vault,
-    foreignAssetMint
+const main = async () => {
+  const managerSecret = Uint8Array.from(
+    JSON.parse(fs.readFileSync(process.env.MANAGER_FILE_PATH!, "utf-8"))
   );
+  const managerSigner = await createKeyPairSignerFromBytes(managerSecret);
+  const rpc = createSolanaRpc(process.env.HELIUS_RPC_URL!);
 
-  let transactionIxs: TransactionInstruction[] = [];
+  const vaultAssetMintPk = new PublicKey(assetMintAddress);
+  const foreignAssetMint = new PublicKey(foreignMintAddress);
+  const assetTokenProgramPk = new PublicKey(assetTokenProgram);
+  const foreignTokenProgramPk = new PublicKey(foreignTokenProgram);
+  const sellAmountInForeign = new BN(sellForeignAmountInForeign);
 
-  const vaultStrategyAssetAta = await setupTokenAccount(
-    connection,
-    managerKp.publicKey,
-    vaultAssetMint,
+  const [vaultStrategyAuth] = await findVaultStrategyAuthPda({
+    vault: vaultAddress,
+    strategy: publicKeyToAddress(foreignAssetMint),
+  });
+
+  const transactionIxs: Instruction[] = [];
+
+  await setupTokenAccount(
+    rpc,
+    managerSigner,
+    assetMintAddress,
     vaultStrategyAuth,
     transactionIxs,
     assetTokenProgram
   );
 
   const vaultStrategyForeignAta = await setupTokenAccount(
-    connection,
-    managerKp.publicKey,
-    foreignAssetMint,
+    rpc,
+    managerSigner,
+    publicKeyToAddress(foreignAssetMint),
     vaultStrategyAuth,
     transactionIxs,
-    foreignTokenProgram
+    publicKeyToAddress(foreignTokenProgramPk)
   );
 
   const [assetOracleInitReceipt] = PublicKey.findProgramAddressSync(
     [
-      Buffer.from(oracleInitReceiptSeed),
-      vaultStrategyAuth.toBuffer(),
-      vaultAssetMint.toBuffer(),
+      Buffer.from(SEEDS.ORACLE_INIT_RECEIPT),
+      new PublicKey(vaultStrategyAuth).toBuffer(),
+      vaultAssetMintPk.toBuffer(),
     ],
-    adaptorProgram
+    new PublicKey(ADAPTOR_PROGRAM_ID)
   );
-
   const [foreignOracleInitReceipt] = PublicKey.findProgramAddressSync(
     [
-      Buffer.from(oracleInitReceiptSeed),
-      vaultStrategyAuth.toBuffer(),
+      Buffer.from(SEEDS.ORACLE_INIT_RECEIPT),
+      new PublicKey(vaultStrategyAuth).toBuffer(),
       foreignAssetMint.toBuffer(),
     ],
-    adaptorProgram
+    new PublicKey(ADAPTOR_PROGRAM_ID)
   );
 
   const remainingAccounts: AccountMeta[] = [
-    {
-      pubkey: assetOracle,
-      isWritable: false,
-      isSigner: false,
-    },
-    {
-      pubkey: assetOracleInitReceipt,
-      isWritable: false,
-      isSigner: false,
-    },
-    {
-      pubkey: vaultStrategyForeignAta,
-      isWritable: true,
-      isSigner: false,
-    },
-    {
-      pubkey: foreignTokenProgram,
-      isWritable: false,
-      isSigner: false,
-    },
-    {
-      pubkey: foreignOracle,
-      isWritable: false,
-      isSigner: false,
-    },
-    {
-      pubkey: foreignOracleInitReceipt,
-      isWritable: false,
-      isSigner: false,
-    },
+    { pubkey: new PublicKey(assetOracleAddress), isWritable: false, isSigner: false },
+    { pubkey: assetOracleInitReceipt, isWritable: false, isSigner: false },
+    { pubkey: new PublicKey(vaultStrategyForeignAta), isWritable: true, isSigner: false },
+    { pubkey: foreignTokenProgramPk, isWritable: false, isSigner: false },
+    { pubkey: new PublicKey(foreignOracleAddress), isWritable: false, isSigner: false },
+    { pubkey: foreignOracleInitReceipt, isWritable: false, isSigner: false },
   ];
 
   let additionalArgs: Buffer = Buffer.from([]);
-  let lookupTableAddresses: string[] = lookupTableAddress
-    ? [lookupTableAddress]
-    : [];
+  let lookupTableAddresses: string[] = useLookupTable ? [lookupTableAddress] : [];
 
-  const {
-    additionalArgs: additionalArgsTemp,
-    lookupTableAddresses: lookupTableAddressesTemp,
-  } = await setupJupiterSwap(
-    sellAmountInForeign,
-    new BN(0),
-    vaultStrategyAuth,
-    foreignAssetMint,
-    vaultAssetMint,
-    jupiterSlippageBps,
-    jupiterMaxAccounts,
-    additionalArgs,
-    remainingAccounts,
-    lookupTableAddresses
-  );
-
-  additionalArgs = additionalArgsTemp;
-  lookupTableAddresses = lookupTableAddressesTemp;
-
-  const createWithdrawStrategyIx = await vc.createWithdrawStrategyIx(
-    {
-      withdrawAmount: sellAmountInForeign,
-      instructionDiscriminator: Buffer.from(instructionDiscriminator),
-      additionalArgs: additionalArgs.length > 0 ? additionalArgs : null,
-    },
-    {
-      manager: managerKp.publicKey,
-      vault,
-      vaultAssetMint,
-      strategy: foreignAssetMint,
-      assetTokenProgram,
-      adaptorProgram,
+  if (sellAmountInForeign.gt(new BN(0))) {
+    const setup = await setupJupiterSwap(
+      new BN(0),
+      sellAmountInForeign,
+      new PublicKey(vaultStrategyAuth),
+      vaultAssetMintPk,
+      foreignAssetMint,
+      jupiterSlippageBps,
+      jupiterMaxAccounts,
+      additionalArgs,
       remainingAccounts,
-    }
-  );
+      lookupTableAddresses
+    );
+    additionalArgs = setup.additionalArgs;
+    lookupTableAddresses = setup.lookupTableAddresses;
+  }
 
-  transactionIxs.push(createWithdrawStrategyIx);
+  const withdrawStrategyIx = await getWithdrawStrategyInstructionAsync({
+    manager: managerSigner,
+    vault: vaultAddress,
+    strategy: publicKeyToAddress(foreignAssetMint),
+    vaultAssetMint: assetMintAddress,
+    assetTokenProgram,
+    adaptorProgram: address(ADAPTOR_PROGRAM_ID),
+    amount: BigInt(sellAmountInForeign.toString()),
+    instructionDiscriminator: new Uint8Array(DISCRIMINATOR.SWAP_SPOT),
+    additionalArgs: additionalArgs.length > 0 ? new Uint8Array(additionalArgs) : null,
+  });
 
-  const lookupTableAccounts = lookupTableAddresses
-    ? await getAddressLookupTableAccounts(lookupTableAddresses, connection)
-    : [];
+  transactionIxs.push(appendRemainingAccounts(withdrawStrategyIx, remainingAccounts));
 
   const txSig = await sendAndConfirmOptimisedTx(
     transactionIxs,
     process.env.HELIUS_RPC_URL!,
-    managerKp,
-    [],
-    lookupTableAccounts
+    managerSigner,
+    lookupTableAddresses.length > 0
+      ? await getAddressesByLookupTable(
+          lookupTableAddresses.map((value) => address(value)),
+          rpc
+        )
+      : {}
   );
-  console.log("Spot bought with signature:", txSig);
-};
-
-const main = async () => {
-  const managerKpFile = fs.readFileSync(
-    process.env.MANAGER_FILE_PATH!,
-    "utf-8"
-  );
-  const managerKpData = JSON.parse(managerKpFile);
-  const managerSecret = Uint8Array.from(managerKpData);
-  const managerKp = Keypair.fromSecretKey(managerSecret);
-
-  await sellSpotHandler(
-    new Connection(process.env.HELIUS_RPC_URL!),
-    managerKp,
-    new PublicKey(vaultAddress),
-    new PublicKey(assetMintAddress),
-    new PublicKey(assetTokenProgram),
-    new PublicKey(assetOracleAddress),
-    new PublicKey(foreignMintAddress),
-    new PublicKey(foreignTokenProgram),
-    new PublicKey(foreignOracleAddress),
-    new PublicKey(ADAPTOR_PROGRAM_ID),
-    SEEDS.ORACLE_INIT_RECEIPT,
-    new BN(sellForeignAmountInForeign),
-    jupiterSlippageBps,
-    jupiterMaxAccounts,
-    DISCRIMINATOR.SWAP_SPOT,
-    useLookupTable ? lookupTableAddress : null
-  );
+  console.log("Spot sold with signature:", txSig);
 };
 
 main();

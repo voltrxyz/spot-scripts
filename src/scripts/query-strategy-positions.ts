@@ -2,17 +2,15 @@ import "dotenv/config";
 import { createSolanaRpc } from "@solana/kit";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import {
-  VoltrClient,
   fetchAllStrategyInitReceiptAccountsOfVault,
   fetchVault,
+  findVaultStrategyAuthPda,
 } from "@voltr/vault-sdk";
 import { vaultAddress } from "../../config/base";
 import { Connection, PublicKey } from "@solana/web3.js";
-
 const main = async () => {
   const rpc = createSolanaRpc(process.env.HELIUS_RPC_URL!);
   const connection = new Connection(process.env.HELIUS_RPC_URL!);
-  const vc = new VoltrClient(connection);
   const vault = new PublicKey(vaultAddress);
 
   const vaultAccount = await fetchVault(rpc, vaultAddress);
@@ -39,14 +37,14 @@ const main = async () => {
       .getAccountInfo(new PublicKey(allocation.data.strategy))
       .then((accInfo) => accInfo?.owner);
 
-    const strategyAuthority = vc.findVaultStrategyAuth(
-      vault,
-      new PublicKey(allocation.data.strategy)
-    );
+    const [strategyAuthority] = await findVaultStrategyAuthPda({
+      vault: vaultAddress,
+      strategy: allocation.data.strategy,
+    });
 
     const strategyForeignAta = getAssociatedTokenAddressSync(
       new PublicKey(allocation.data.strategy),
-      strategyAuthority,
+      new PublicKey(strategyAuthority),
       true,
       foreignTokenProgram
     );

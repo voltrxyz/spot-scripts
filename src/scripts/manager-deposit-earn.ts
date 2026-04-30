@@ -1,17 +1,21 @@
 import "dotenv/config";
 import * as fs from "fs";
+import { BN } from "@coral-xyz/anchor";
 import {
-  Connection,
-  Keypair,
-  PublicKey,
-  TransactionInstruction,
-} from "@solana/web3.js";
+  address,
+  createKeyPairSignerFromBytes,
+  createSolanaRpc,
+} from "@solana/kit";
 import {
-  getAddressLookupTableAccounts,
+  findVaultStrategyAuthPda,
+  getDepositStrategyInstructionAsync,
+} from "@voltr/vault-sdk";
+import {
+  getAddressesByLookupTable,
+  appendRemainingAccounts,
+  publicKeyToAddress,
   sendAndConfirmOptimisedTx,
 } from "../utils/helper";
-import { BN } from "@coral-xyz/anchor";
-import { VoltrClient } from "@voltr/vault-sdk";
 import {
   assetMintAddress,
   vaultAddress,
@@ -22,7 +26,6 @@ import {
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
   getAssociatedTokenAddressSync,
-  TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
 import {
   ADAPTOR_PROGRAM_ID,
@@ -33,106 +36,83 @@ import {
 } from "../constants/spot";
 import { depositStrategyAmount } from "../../config/spot";
 import { SYSTEM_PROGRAM_ID } from "@coral-xyz/anchor/dist/cjs/native/system";
+import { PublicKey } from "@solana/web3.js";
 
-const payerKpFile = fs.readFileSync(process.env.MANAGER_FILE_PATH!, "utf-8");
-const payerKpData = JSON.parse(payerKpFile);
-const payerSecret = Uint8Array.from(payerKpData);
-const payerKp = Keypair.fromSecretKey(payerSecret);
-const payer = payerKp.publicKey;
+const main = async () => {
+  const payerSecret = Uint8Array.from(
+    JSON.parse(fs.readFileSync(process.env.MANAGER_FILE_PATH!, "utf-8"))
+  );
+  const payerSigner = await createKeyPairSignerFromBytes(payerSecret);
+  const rpc = createSolanaRpc(process.env.HELIUS_RPC_URL!);
+  const depositAmount = new BN(depositStrategyAmount);
 
-const vault = new PublicKey(vaultAddress);
-const vaultAssetMint = new PublicKey(assetMintAddress);
-const vaultAssetTokenProgram = new PublicKey(assetTokenProgram);
+  const vaultAssetMintPk = new PublicKey(assetMintAddress);
+  const vaultAssetTokenProgram = new PublicKey(assetTokenProgram);
+  const jupiterLendProgram = new PublicKey(JUPITER_LEND_PROGRAM_ID);
+  const jupiterLiquidityProgram = new PublicKey(JUPITER_LIQUIDITY_PROGRAM_ID);
+  const jupiterRewardsRateProgram = new PublicKey(JUPITER_REWARDS_RATE_PROGRAM_ID);
 
-const connection = new Connection(process.env.HELIUS_RPC_URL!);
-const vc = new VoltrClient(connection);
-const depositAmount = new BN(depositStrategyAmount);
-
-const depositEarnStrategy = async (
-  depositAmount: BN,
-  vault: PublicKey,
-  vaultAssetMint: PublicKey,
-  vaultAssetTokenProgram: PublicKey,
-  adaptorProgram: PublicKey,
-  jupiterLendProgram: PublicKey,
-  jupiterLiquidityProgram: PublicKey,
-  jupiterRewardsRateProgram: PublicKey,
-  instructionDiscriminator: number[],
-  lookupTableAddresses: string[] = []
-) => {
   const [fTokenMint] = PublicKey.findProgramAddressSync(
-    [Buffer.from("f_token_mint"), vaultAssetMint.toBuffer()],
+    [Buffer.from("f_token_mint"), vaultAssetMintPk.toBuffer()],
     jupiterLendProgram
   );
-
   const [lendingAdmin] = PublicKey.findProgramAddressSync(
     [Buffer.from("lending_admin")],
     jupiterLendProgram
   );
-
   const [lending] = PublicKey.findProgramAddressSync(
-    [Buffer.from("lending"), vaultAssetMint.toBuffer(), fTokenMint.toBuffer()],
+    [Buffer.from("lending"), vaultAssetMintPk.toBuffer(), fTokenMint.toBuffer()],
     jupiterLendProgram
   );
-
   const [supplyTokenReservesLiquidity] = PublicKey.findProgramAddressSync(
-    [Buffer.from("reserve"), vaultAssetMint.toBuffer()],
+    [Buffer.from("reserve"), vaultAssetMintPk.toBuffer()],
     jupiterLiquidityProgram
   );
-
   const [rateModel] = PublicKey.findProgramAddressSync(
-    [Buffer.from("rate_model"), vaultAssetMint.toBuffer()],
+    [Buffer.from("rate_model"), vaultAssetMintPk.toBuffer()],
     jupiterLiquidityProgram
   );
-
   const [liquidity] = PublicKey.findProgramAddressSync(
     [Buffer.from("liquidity")],
     jupiterLiquidityProgram
   );
-
   const [rewardsRateModel] = PublicKey.findProgramAddressSync(
-    [Buffer.from("lending_rewards_rate_model"), vaultAssetMint.toBuffer()],
+    [Buffer.from("lending_rewards_rate_model"), vaultAssetMintPk.toBuffer()],
     jupiterRewardsRateProgram
   );
-
   const [lendingSupplyPositionOnLiquidity] = PublicKey.findProgramAddressSync(
     [
       Buffer.from("user_supply_position"),
-      vaultAssetMint.toBuffer(),
+      vaultAssetMintPk.toBuffer(),
       lending.toBuffer(),
     ],
     jupiterLiquidityProgram
   );
 
-  const { vaultStrategyAuth } = vc.findVaultStrategyAddresses(vault, lending);
-
-  let transactionIxs: TransactionInstruction[] = [];
+  const [vaultStrategyAuth] = await findVaultStrategyAuthPda({
+    vault: vaultAddress,
+    strategy: publicKeyToAddress(lending),
+  });
 
   const vaultStrategyFTokenAta = getAssociatedTokenAddressSync(
     fTokenMint,
-    vaultStrategyAuth,
+    new PublicKey(vaultStrategyAuth),
     true,
     vaultAssetTokenProgram
   );
-
   const jVault = getAssociatedTokenAddressSync(
-    vaultAssetMint,
+    vaultAssetMintPk,
     liquidity,
     true,
     vaultAssetTokenProgram
   );
 
-  // Prepare the remaining accounts
   const remainingAccounts = [
     { pubkey: vaultStrategyFTokenAta, isSigner: false, isWritable: true },
     { pubkey: lendingAdmin, isSigner: false, isWritable: false },
     { pubkey: fTokenMint, isSigner: false, isWritable: true },
     { pubkey: supplyTokenReservesLiquidity, isSigner: false, isWritable: true },
-    {
-      pubkey: lendingSupplyPositionOnLiquidity,
-      isSigner: false,
-      isWritable: true,
-    },
+    { pubkey: lendingSupplyPositionOnLiquidity, isSigner: false, isWritable: true },
     { pubkey: rateModel, isSigner: false, isWritable: false },
     { pubkey: jVault, isSigner: false, isWritable: true },
     { pubkey: liquidity, isSigner: false, isWritable: true },
@@ -143,51 +123,27 @@ const depositEarnStrategy = async (
     { pubkey: jupiterLendProgram, isSigner: false, isWritable: true },
   ];
 
-  const createDepositStrategyIx = await vc.createDepositStrategyIx(
-    {
-      instructionDiscriminator: Buffer.from(instructionDiscriminator),
-      depositAmount,
-    },
-    {
-      manager: payer,
-      vault,
-      vaultAssetMint,
-      assetTokenProgram: vaultAssetTokenProgram,
-      strategy: lending,
-      remainingAccounts,
-      adaptorProgram: new PublicKey(adaptorProgram),
-    }
-  );
-
-  transactionIxs.push(createDepositStrategyIx);
-
-  const lookupTableAccounts = lookupTableAddresses
-    ? await getAddressLookupTableAccounts(lookupTableAddresses, connection)
-    : [];
+  const depositStrategyIx = await getDepositStrategyInstructionAsync({
+    manager: payerSigner,
+    vault: vaultAddress,
+    strategy: publicKeyToAddress(lending),
+    vaultAssetMint: assetMintAddress,
+    assetTokenProgram,
+    adaptorProgram: address(ADAPTOR_PROGRAM_ID),
+    amount: BigInt(depositAmount.toString()),
+    instructionDiscriminator: new Uint8Array(DISCRIMINATOR.DEPOSIT_JUPITER_EARN),
+    additionalArgs: null,
+  });
 
   const txSig = await sendAndConfirmOptimisedTx(
-    transactionIxs,
+    [appendRemainingAccounts(depositStrategyIx, remainingAccounts)],
     process.env.HELIUS_RPC_URL!,
-    payerKp,
-    [],
-    lookupTableAccounts
+    payerSigner,
+    useLookupTable && lookupTableAddress
+      ? await getAddressesByLookupTable([lookupTableAddress], rpc)
+      : {}
   );
   console.log("Jupiter earn deposited with signature:", txSig);
-};
-
-const main = async () => {
-  await depositEarnStrategy(
-    depositAmount,
-    vault,
-    vaultAssetMint,
-    vaultAssetTokenProgram,
-    new PublicKey(ADAPTOR_PROGRAM_ID),
-    new PublicKey(JUPITER_LEND_PROGRAM_ID),
-    new PublicKey(JUPITER_LIQUIDITY_PROGRAM_ID),
-    new PublicKey(JUPITER_REWARDS_RATE_PROGRAM_ID),
-    DISCRIMINATOR.DEPOSIT_JUPITER_EARN,
-    useLookupTable ? [lookupTableAddress] : []
-  );
 };
 
 main();
